@@ -1,12 +1,42 @@
 const Bot = require('./lib/Bot')
 const SOFA = require('sofa-js')
 const Fiat = require('./lib/Fiat')
+const Logger = require('./lib/Logger');
+const PsqlStore = require('./PsqlStore');
 
-let bot = new Bot()
+var bot = new Bot()
+
+const DATABASE_TABLES = `
+CREATE TABLE IF NOT EXISTS givotak_history (
+    givotak_id BIGSERIAL PRIMARY KEY,
+    toshi_id_tak VARCHAR NOT NULL,
+    tak_amount REAL,
+    tak_coin VARCHAR,
+    toshi_id_giv VARCHAR,
+    date TIMESTAMP WITHOUT TIME ZONE DEFAULT (now() AT TIME ZONE 'utc')
+);
+`;
+
+const GIVE_OR_TAKE = [
+  {type: 'button', label: 'Give', value: 'give'}, 
+  {type: 'button', label: 'Take', value: 'take'},
+];
+
+bot.onReady = () => {
+  bot.dbStore = new PsqlStore(bot.client.config.storage.postgres.url, process.env.STAGE || 'development');
+  bot.dbStore.initialize(DATABASE_TABLES).then(() => {}).catch((err) => {
+    Logger.error(err);
+  });
+};
 
 // ROUTING
 
 bot.onEvent = function(session, message) {
+
+  if (session.user.is_app) {
+      return;
+  }
+
   switch (message.type) {
     case 'Init':
       welcome(session)
@@ -17,70 +47,208 @@ bot.onEvent = function(session, message) {
     case 'Command':
       onCommand(session, message)
       break
-    case 'Payment':
-      onPayment(session, message)
-      break
-    case 'PaymentRequest':
-      welcome(session)
-      break
   }
 }
 
 function onMessage(session, message) {
-  welcome(session)
+  var step = session.get('step');
+  var o = session.get('o');
+  if (o == 'tak') {
+    switch (step){
+      case 'begin':
+        session.set('coinType', message.body);
+        session.set('step', 'coin type');
+        break;
+      case 'coin type':
+        session.set('coinAmount', message.body);
+        session.set('step', 'coin amount');
+        break;
+    }
+    take(session);
+  } else if (o == 'giv'){
+    switch(step){
+      case 'begin':
+        session.set('coinType', message.body);
+        session.set('step', 'coin type');
+        break;
+      case 'coin type':
+        session.set('coinAmount', message.body);
+        session.set('step', 'coin amount');
+        break;
+    }
+    give(session);
+  } else { // o == 'o
+    welcome(session);
+  }
 }
 
 function onCommand(session, command) {
   switch (command.content.value) {
-    case 'ping':
-      pong(session)
-      break
-    case 'count':
-      count(session)
-      break
-    case 'donate':
-      donate(session)
-      break
+    case 'give':
+      session.set('o', 'giv');
+      session.set('step', 'begin');
+      give(session);
+      break;
+    case 'take':
+      session.set('step', 'begin');
+      session.set('o', 'tak');
+      take(session);
+      break;
     }
-}
-
-function onPayment(session, message) {
-  if (message.fromAddress == session.config.paymentAddress) {
-    // handle payments sent by the bot
-    if (message.status == 'confirmed') {
-      // perform special action once the payment has been confirmed
-      // on the network
-    } else if (message.status == 'error') {
-      // oops, something went wrong with a payment we tried to send!
-    }
-  } else {
-    // handle payments sent to the bot
-    if (message.status == 'unconfirmed') {
-      // payment has been sent to the ethereum network, but is not yet confirmed
-      sendMessage(session, `Thanks for the payment! 🙏`);
-    } else if (message.status == 'confirmed') {
-      // handle when the payment is actually confirmed!
-    } else if (message.status == 'error') {
-      sendMessage(session, `There was an error with your payment!🚫`);
-    }
-  }
 }
 
 // STATES
 
 function welcome(session) {
-  sendMessage(session, `Hello Token!`)
+  session.set('step', 'begin');
+  session.set('o', 'o');
+  session.reply(SOFA.Message({
+    body: "Give Or Take?",
+    controls: GIVE_OR_TAKE,
+    showKeyboard: false
+  }));
+};
+
+function closest (num, arr) {
+  var curr = arr[0];
+  var diff = Math.abs (num - curr);
+  for (var val = 0; val < arr.length; val++) {
+      var newdiff = Math.abs (num - arr[val]);
+      if (newdiff < diff) {
+          diff = newdiff;
+          curr = arr[val];
+      }
+  }
+  return curr;
 }
 
-function pong(session) {
-  sendMessage(session, `Pong`)
+function give(session) {
+  var step = session.get('step');
+  switch(step){
+    case 'begin':
+      session.reply(SOFA.Message({
+        body: "What coin do you want to give (ETH, 1ST, DATA, ...)?",
+        showKeyboard: true
+      }));
+      break;
+    case 'coin type':
+      var coinType = session.get('coinType');
+      bot.dbStore.fetchval("SELECT COUNT(*) FROM givotak_history where tak_coin = $1 and age(now(), date) < '2 minutes'",
+                     [coinType]).then((count) => {
+                      switch (count){
+                        case '0':
+                          session.reply(SOFA.Message({
+                            body: "There is no tak for the coin. Have another?",
+                            controls: GIVE_OR_TAKE,
+                            showKeyboard: false
+                          }));
+                          break;
+                        case '1':
+                          bot.dbStore.fetch("SELECT * FROM givotak_history where tak_coin = $1 and age(now(), date) < '2 minutes'",
+                            [coinType]).then((rows) => {
+                              var body = "\uD83D\uDCAC @" + rows[0].toshi_id_tak + "\n";
+                              session.reply(SOFA.Message({
+                                body: body + "I need " + rows[0].tak_amount + " " + rows[0].tak_coin + "."
+                              }));
+                              session.reply(SOFA.Message({
+                                 body: "That was lone. Have another?",
+                                 controls: GIVE_OR_TAKE,
+                                 showKeyboard: false
+                              }));
+                            }).catch((err) => {
+                                session.reply(SOFA.Message({
+                                   body: "An error occured: " + err + "\n Do you want to try again?",
+                                   controls: GIVE_OR_TAKE,
+                                   showKeyboard: false
+                                }));
+                              });
+                          break;
+                        default:
+                          if (parseInt(count) > 1){
+                            session.reply(SOFA.Message({
+                              body: "What amount do you want to give?",
+                              showKeyboard: true
+                            }));
+                          } else {
+                            session.reply(SOFA.Message({
+                                   body: "An error occured: " + "Count is: " + count + "\n Do you want to try again?",
+                                   controls: GIVE_OR_TAKE,
+                                   showKeyboard: false
+                            }));
+                          }
+                          break;
+                     }
+                   }).catch((err) => {
+                        session.reply(SOFA.Message({
+                                   body: "An error occured: " + err + "\n Do you want to try again?",
+                                   controls: GIVE_OR_TAKE,
+                                   showKeyboard: false
+                        }));
+                      });
+      break;
+    case 'coin amount':
+      var coinType = session.get('coinType');
+      var coinAmount = session.get('coinAmount');
+      bot.dbStore.fetch("SELECT * FROM givotak_history where tak_coin = $1 and age(now(), date) < '2 minutes'",
+                            [coinType]).then((rows) => {
+                              var rowsAmount = rows.map((row) => row.tak_amount);
+                              var closestAmount = closest(coinAmount, rowsAmount);
+                              var rowBest = rows.find((row) => row.tak_amount == closestAmount);
+                              var body = "\uD83D\uDCAC @" + rowBest.toshi_id_tak + "\n";
+                              session.reply(SOFA.Message({
+                                body: body + "I need " + rowBest.tak_amount + " " + rowBest.tak_coin + "." ,
+                              }));
+                              session.reply(SOFA.Message({
+                                 body: "That was best. Have another?",
+                                 controls: GIVE_OR_TAKE,
+                                 showKeyboard: false
+                              }));
+                            }).catch((err) => {
+                                session.reply(SOFA.Message({
+                                   body: "An error occured: " + err + "\n Do you want to try again?",
+                                   controls: GIVE_OR_TAKE,
+                                   showKeyboard: false
+                                }));
+                              });
+      break;     
+  }
 }
 
 // example of how to store state on each user
-function count(session) {
-  let count = (session.get('count') || 0) + 1
-  session.set('count', count)
-  sendMessage(session, `${count}`)
+function take(session) {
+  var step = session.get('step');
+    switch(step){
+      case 'begin':
+        session.reply(SOFA.Message({
+          body: "What coin do you want to take (ETH, 1ST, DATA, ...)?",
+          showKeyboard: true
+        }));
+        break;
+      case 'coin type':
+        session.reply(SOFA.Message({
+          body: "What amount do you want to take?",
+          showKeyboard: true
+        }));
+        break;
+      case 'coin amount':
+        var coinAmount = session.get('coinAmount');
+        var coinType = session.get('coinType');
+        bot.dbStore.execute("INSERT INTO givotak_history (toshi_id_tak, tak_amount, tak_coin, toshi_id_giv, date) VALUES ($1, $2, $3, NULL, now() AT TIME ZONE 'utc')", [session.user.username, coinAmount, coinType])
+          .then(() => {
+            session.reply(SOFA.Message({
+              body: "You took, now wait for a giver! Have another?",
+              controls: GIVE_OR_TAKE,
+              showKeyboard: false
+            }));
+          }).catch((err) => {
+              session.reply(SOFA.Message({
+                body: "An error occured: " + err + "\n Do you want to try again?",
+                controls: GIVE_OR_TAKE,
+                showKeyboard: false
+              }));
+            });;
+        break;
+  }
 }
 
 function donate(session) {
@@ -93,14 +261,9 @@ function donate(session) {
 // HELPERS
 
 function sendMessage(session, message) {
-  let controls = [
-    {type: 'button', label: 'Ping', value: 'ping'},
-    {type: 'button', label: 'Count', value: 'count'},
-    {type: 'button', label: 'Donate', value: 'donate'}
-  ]
   session.reply(SOFA.Message({
     body: message,
-    controls: controls,
+    controls: GIVE_OR_TAKE,
     showKeyboard: false,
   }))
 }
