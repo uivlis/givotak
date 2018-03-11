@@ -64,25 +64,24 @@ function onMessage(session, message) {
         break;
     }
   if (o == 'tak') {   
-    return take(session);
+    take(session);
   } else if (o == 'giv'){
-    return give(session);
+    give(session);
   } else { // o == 'o'
-    return welcome(session);
+    welcome(session);
   }
 }
 
 function onCommand(session, command) {
+  session.set('step', 'begin');
   switch (command.content.value) {
     case 'give':
       session.set('o', 'giv');
-      session.set('step', 'begin');
-      return give(session);
+      give(session);
       break;
     case 'take':
       session.set('o', 'tak');
-      session.set('step', 'begin');
-      return take(session);
+      take(session);
       break;
     }
 }
