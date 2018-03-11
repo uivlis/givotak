@@ -56,11 +56,11 @@ function onMessage(session, message) {
   switch (step){
       case 'begin':
         session.set('coinType', message.body);
-        session.set('step', 'coin type');
+        session.set('step', 'coin_type');
         break;
       case 'coin type':
         session.set('coinAmount', message.body);
-        session.set('step', 'coin amount');
+        session.set('step', 'coin_amount');
         break;
     }
   if (o == 'tak') {   
@@ -120,7 +120,7 @@ function take(session) {
         showKeyboard: true
       }));
       break;
-    case 'coin type':
+    case 'coin_type':
       var coinType = session.get('coinType');
       bot.dbStore.fetchval("SELECT COUNT(*) FROM givotak_history where tak_coin = $1 and age(now(), date) < '2 minutes'",
                      [coinType]).then((count) => {
@@ -158,6 +158,7 @@ function take(session) {
                               body: "What amount do you want to take?",
                               showKeyboard: true
                             }));
+                            break;
                           } else {
                             session.reply(SOFA.Message({
                                    body: "An error occured: " + "Count is: " + count + "\n Do you want to try again?",
@@ -175,7 +176,7 @@ function take(session) {
                         }));
                       });
       break;
-    case 'coin amount':
+    case 'coin_amount':
       var coinType = session.get('coinType');
       var coinAmount = session.get('coinAmount');
       bot.dbStore.fetch("SELECT * FROM givotak_history where tak_coin = $1 and age(now(), date) < '2 minutes'",
@@ -212,13 +213,13 @@ function give(session) {
           showKeyboard: true
         }));
         break;
-      case 'coin type':
+      case 'coin_type':
         session.reply(SOFA.Message({
           body: "What amount do you want to give?",
           showKeyboard: true
         }));
         break;
-      case 'coin amount':
+      case 'coin_amount':
         var coinAmount = session.get('coinAmount');
         var coinType = session.get('coinType');
         bot.dbStore.execute("INSERT INTO givotak_history (toshi_id_tak, tak_amount, tak_coin, toshi_id_giv, date) VALUES ($1, $2, $3, NULL, now() AT TIME ZONE 'utc')", [session.user.username, coinAmount, coinType])
