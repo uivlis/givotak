@@ -58,7 +58,7 @@ function onMessage(session, message) {
         session.set('coinType', message.body);
         session.set('step', 'coin_type');
         break;
-      case 'coin type':
+      case 'coin_type':
         session.set('coinAmount', message.body);
         session.set('step', 'coin_amount');
         break;
@@ -158,7 +158,6 @@ function take(session) {
                               body: "What amount do you want to take?",
                               showKeyboard: true
                             }));
-                            break;
                           } else {
                             session.reply(SOFA.Message({
                                    body: "An error occured: " + "Count is: " + count + "\n Do you want to try again?",
