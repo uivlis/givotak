@@ -53,8 +53,7 @@ bot.onEvent = function(session, message) {
 function onMessage(session, message) {
   var step = session.get('step');
   var o = session.get('o');
-  if (o == 'tak') {
-    switch (step){
+  switch (step){
       case 'begin':
         session.set('coinType', message.body);
         session.set('step', 'coin type');
@@ -64,21 +63,12 @@ function onMessage(session, message) {
         session.set('step', 'coin amount');
         break;
     }
-    take(session);
+  if (o == 'tak') {   
+    return take(session);
   } else if (o == 'giv'){
-    switch(step){
-      case 'begin':
-        session.set('coinType', message.body);
-        session.set('step', 'coin type');
-        break;
-      case 'coin type':
-        session.set('coinAmount', message.body);
-        session.set('step', 'coin amount');
-        break;
-    }
-    give(session);
-  } else { // o == 'o
-    welcome(session);
+    return give(session);
+  } else { // o == 'o'
+    return welcome(session);
   }
 }
 
@@ -87,12 +77,12 @@ function onCommand(session, command) {
     case 'give':
       session.set('o', 'giv');
       session.set('step', 'begin');
-      give(session);
+      return give(session);
       break;
     case 'take':
-      session.set('step', 'begin');
       session.set('o', 'tak');
-      take(session);
+      session.set('step', 'begin');
+      return take(session);
       break;
     }
 }
@@ -100,8 +90,8 @@ function onCommand(session, command) {
 // STATES
 
 function welcome(session) {
-  session.set('step', 'begin');
   session.set('o', 'o');
+  session.set('step', 'begin');
   session.reply(SOFA.Message({
     body: "Give Or Take?",
     controls: GIVE_OR_TAKE,
@@ -122,12 +112,12 @@ function closest (num, arr) {
   return curr;
 }
 
-function give(session) {
+function take(session) {
   var step = session.get('step');
   switch(step){
     case 'begin':
       session.reply(SOFA.Message({
-        body: "What coin do you want to give (ETH, 1ST, DATA, ...)?",
+        body: "What coin do you want to take (ETH, 1ST, DATA, ...)?",
         showKeyboard: true
       }));
       break;
@@ -138,7 +128,7 @@ function give(session) {
                       switch (count){
                         case '0':
                           session.reply(SOFA.Message({
-                            body: "There is no tak for the coin. Have another?",
+                            body: "There is no giv for the coin. Have another?",
                             controls: GIVE_OR_TAKE,
                             showKeyboard: false
                           }));
@@ -148,7 +138,7 @@ function give(session) {
                             [coinType]).then((rows) => {
                               var body = "\uD83D\uDCAC @" + rows[0].toshi_id_tak + "\n";
                               session.reply(SOFA.Message({
-                                body: body + "I need " + rows[0].tak_amount + " " + rows[0].tak_coin + "."
+                                body: body + "I give " + rows[0].tak_amount + " " + rows[0].tak_coin + "."
                               }));
                               session.reply(SOFA.Message({
                                  body: "That was lone. Have another?",
@@ -166,7 +156,7 @@ function give(session) {
                         default:
                           if (parseInt(count) > 1){
                             session.reply(SOFA.Message({
-                              body: "What amount do you want to give?",
+                              body: "What amount do you want to take?",
                               showKeyboard: true
                             }));
                           } else {
@@ -196,7 +186,7 @@ function give(session) {
                               var rowBest = rows.find((row) => row.tak_amount == closestAmount);
                               var body = "\uD83D\uDCAC @" + rowBest.toshi_id_tak + "\n";
                               session.reply(SOFA.Message({
-                                body: body + "I need " + rowBest.tak_amount + " " + rowBest.tak_coin + "." ,
+                                body: body + "I give " + rowBest.tak_amount + " " + rowBest.tak_coin + "." ,
                               }));
                               session.reply(SOFA.Message({
                                  body: "That was best. Have another?",
@@ -214,19 +204,18 @@ function give(session) {
   }
 }
 
-// example of how to store state on each user
-function take(session) {
+function give(session) {
   var step = session.get('step');
     switch(step){
       case 'begin':
         session.reply(SOFA.Message({
-          body: "What coin do you want to take (ETH, 1ST, DATA, ...)?",
+          body: "What coin do you want to give (ETH, 1ST, DATA, ...)?",
           showKeyboard: true
         }));
         break;
       case 'coin type':
         session.reply(SOFA.Message({
-          body: "What amount do you want to take?",
+          body: "What amount do you want to give?",
           showKeyboard: true
         }));
         break;
@@ -236,7 +225,7 @@ function take(session) {
         bot.dbStore.execute("INSERT INTO givotak_history (toshi_id_tak, tak_amount, tak_coin, toshi_id_giv, date) VALUES ($1, $2, $3, NULL, now() AT TIME ZONE 'utc')", [session.user.username, coinAmount, coinType])
           .then(() => {
             session.reply(SOFA.Message({
-              body: "You took, now wait for a giver! Have another?",
+              body: "You gave, now wait for a taker! Have another?",
               controls: GIVE_OR_TAKE,
               showKeyboard: false
             }));
